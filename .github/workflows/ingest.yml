@@ -1,0 +1,49 @@
+name: Daily Ingest
+
+on:
+  schedule:
+    - cron: "0 2 * * *" # UTC 2:00 = 北京时间 10:00
+  workflow_dispatch: {} # 支持手动触发，调试用
+
+concurrency:
+  group: ingest
+  cancel-in-progress: true
+
+jobs:
+  ingest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Run ingest pipeline
+        run: npm run ingest
+        env:
+          GITHUB_TOKEN: ${{ secrets.GH_PAT }} # PAT（公开仓库只读权限即可），比内置 token 限额高
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }} # ⚠️ 仅存于 Secrets
+          AI_API_KEY: ${{ secrets.AI_API_KEY }} # 可选，不配则仅用规则分类
+          AI_BASE_URL: ${{ vars.AI_BASE_URL }} # 可选，默认 OpenAI 兼容接口
+          AI_MODEL: ${{ vars.AI_MODEL }} # 可选
+          SITE_URL: ${{ vars.SITE_URL }} # 可选，如 https://your-site.vercel.app
+          REVALIDATE_SECRET: ${{ secrets.REVALIDATE_SECRET }} # 可选
+
+      - name: Notify on failure
+        if: failure()
+        run: |
+          if [ -n "$SLACK_WEBHOOK" ]; then
+            curl -sf -X POST "$SLACK_WEBHOOK" \
+              -H 'Content-Type: application/json' \
+              -d "{\"text\":\"🚨 GitTrend Hub ingest failed: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\"}" || true
+          else
+            echo "未配置 SLACK_WEBHOOK，跳过通知"
+          fi
+        env:
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}

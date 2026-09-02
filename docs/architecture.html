@@ -1,0 +1,759 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GitTrend Hub · 技术架构设计方案</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/styles/github-dark.min.css">
+<style>
+  :root {
+    --bg: #f6f7fb;
+    --surface: #ffffff;
+    --text: #1a1f2e;
+    --muted: #5b6472;
+    --accent: #6366f1;
+    --accent-deep: #4f46e5;
+    --accent-soft: #eef0ff;
+    --border: #e5e8f0;
+    --code-bg: #0d1117;
+    --code-text: #e6edf3;
+    --warn-bg: #fffbeb;
+    --warn-border: #f59e0b;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; scroll-padding-top: 72px; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Segoe UI", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.8;
+    -webkit-font-smoothing: antialiased;
+  }
+  .container { max-width: 980px; margin: 0 auto; padding: 0 24px; }
+
+  /* ── Hero ── */
+  .hero {
+    background: linear-gradient(135deg, #14172e 0%, #262a5c 55%, #4f46e5 130%);
+    color: #fff;
+    padding: 72px 0 56px;
+  }
+  .hero .badge {
+    display: inline-block;
+    font-size: 13px;
+    letter-spacing: .05em;
+    background: rgba(255,255,255,.12);
+    border: 1px solid rgba(255,255,255,.25);
+    padding: 4px 14px;
+    border-radius: 999px;
+    margin-bottom: 20px;
+  }
+  .hero h1 {
+    font-size: 44px;
+    font-weight: 800;
+    letter-spacing: -.02em;
+    line-height: 1.2;
+  }
+  .hero h1 .grad {
+    background: linear-gradient(90deg, #a5b4fc, #f0abfc);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  .hero p.sub {
+    margin-top: 14px;
+    font-size: 17px;
+    color: rgba(255,255,255,.82);
+    max-width: 720px;
+  }
+  .hero .meta { margin-top: 10px; font-size: 13px; color: rgba(255,255,255,.55); }
+  .stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+    gap: 14px;
+    margin-top: 36px;
+  }
+  .stat {
+    background: rgba(255,255,255,.08);
+    border: 1px solid rgba(255,255,255,.16);
+    border-radius: 14px;
+    padding: 16px 18px;
+    backdrop-filter: blur(4px);
+  }
+  .stat .v { font-size: 24px; font-weight: 700; }
+  .stat .k { font-size: 13px; color: rgba(255,255,255,.65); margin-top: 2px; }
+
+  /* ── Nav ── */
+  nav.toc {
+    position: sticky;
+    top: 0;
+    z-index: 50;
+    background: rgba(255,255,255,.88);
+    backdrop-filter: blur(10px);
+    border-bottom: 1px solid var(--border);
+  }
+  nav.toc .container { display: flex; gap: 4px; overflow-x: auto; padding: 0 24px; }
+  nav.toc a {
+    flex-shrink: 0;
+    padding: 13px 14px;
+    font-size: 14px;
+    color: var(--muted);
+    text-decoration: none;
+    border-bottom: 2px solid transparent;
+  }
+  nav.toc a:hover { color: var(--accent-deep); border-bottom-color: var(--accent); }
+
+  /* ── Sections ── */
+  section { padding: 52px 0 8px; }
+  h2 {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-size: 27px;
+    font-weight: 800;
+    letter-spacing: -.01em;
+    margin-bottom: 8px;
+  }
+  h2 .num {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 34px;
+    height: 34px;
+    font-size: 15px;
+    font-weight: 700;
+    color: #fff;
+    background: linear-gradient(135deg, var(--accent), #8b5cf6);
+    border-radius: 10px;
+    flex-shrink: 0;
+  }
+  h3 { font-size: 18px; margin: 30px 0 12px; }
+  section > .container > p.lead { color: var(--muted); margin-bottom: 22px; }
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 22px 24px;
+    margin: 14px 0;
+    box-shadow: 0 1px 3px rgba(20,24,46,.05);
+  }
+  .grid-3 {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 14px;
+    margin: 18px 0;
+  }
+  .feature {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 20px;
+  }
+  .feature .icon { font-size: 26px; }
+  .feature h4 { font-size: 15px; margin: 8px 0 4px; }
+  .feature p { font-size: 13.5px; color: var(--muted); line-height: 1.7; }
+
+  .decision { border-top: 3px solid var(--accent); }
+  .decision .tag {
+    display: inline-block;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--accent-deep);
+    background: var(--accent-soft);
+    padding: 2px 10px;
+    border-radius: 999px;
+    margin-bottom: 8px;
+  }
+  .decision h4 { font-size: 16px; margin-bottom: 6px; }
+  .decision p { font-size: 14px; color: var(--muted); }
+
+  /* ── Tables ── */
+  .table-wrap {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    overflow: hidden;
+    margin: 18px 0;
+    overflow-x: auto;
+  }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th {
+    text-align: left;
+    background: #f1f3f9;
+    padding: 11px 16px;
+    font-weight: 700;
+    white-space: nowrap;
+  }
+  td { padding: 11px 16px; border-top: 1px solid var(--border); vertical-align: top; }
+  td:first-child { font-weight: 600; white-space: nowrap; }
+  tr:hover td { background: #fafbfe; }
+  .pill {
+    display: inline-block;
+    font-size: 12px;
+    font-weight: 600;
+    padding: 1px 10px;
+    border-radius: 999px;
+    white-space: nowrap;
+  }
+  .pill.green { color: #047857; background: #d1fae5; }
+  .pill.purple { color: #5b21b6; background: #ede9fe; }
+
+  /* ── Code ── */
+  pre {
+    background: var(--code-bg);
+    color: var(--code-text);
+    border-radius: 14px;
+    padding: 20px 22px;
+    overflow-x: auto;
+    margin: 16px 0;
+    font-size: 13px;
+    line-height: 1.65;
+    box-shadow: 0 4px 16px rgba(13,17,23,.18);
+  }
+  pre code { background: transparent; padding: 0; color: inherit; font-size: inherit; }
+  code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: .88em;
+    background: #eceef5;
+    color: #3b3f63;
+    padding: 2px 7px;
+    border-radius: 6px;
+  }
+  pre + p.caption, .caption {
+    font-size: 12.5px;
+    color: var(--muted);
+    text-align: center;
+    margin-top: -8px;
+  }
+  .ascii { line-height: 1.45; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+
+  /* ── Callout ── */
+  .callout {
+    border-left: 4px solid var(--warn-border);
+    background: var(--warn-bg);
+    border-radius: 10px;
+    padding: 14px 18px;
+    font-size: 14px;
+    margin: 18px 0;
+  }
+  .callout b { color: #92400e; }
+
+  /* ── Pipeline steps ── */
+  .steps { counter-reset: step; margin: 18px 0; }
+  .step {
+    position: relative;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 18px 20px 18px 64px;
+    margin-bottom: 12px;
+  }
+  .step::before {
+    counter-increment: step;
+    content: counter(step);
+    position: absolute;
+    left: 18px;
+    top: 20px;
+    width: 30px;
+    height: 30px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: 14px;
+    color: #fff;
+    background: linear-gradient(135deg, var(--accent), #8b5cf6);
+    border-radius: 50%;
+  }
+  .step h4 { font-size: 15px; margin-bottom: 4px; }
+  .step p { font-size: 14px; color: var(--muted); }
+
+  /* ── Roadmap ── */
+  .phase {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 20px 24px;
+    margin: 14px 0;
+    border-left: 4px solid #10b981;
+  }
+  .phase.p2 { border-left-color: var(--accent); }
+  .phase.p3 { border-left-color: #8b5cf6; }
+  .phase h4 { font-size: 16px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .phase h4 .when { font-size: 12.5px; font-weight: 600; color: var(--muted); background: #f1f3f9; padding: 2px 10px; border-radius: 999px; }
+  .phase ul { margin: 10px 0 0 20px; font-size: 14px; color: var(--muted); }
+  .phase li { margin: 3px 0; }
+
+  ul.points { margin: 10px 0 0 22px; font-size: 14.5px; }
+  ul.points li { margin: 6px 0; }
+  ul.points li::marker { color: var(--accent); }
+
+  footer {
+    margin-top: 64px;
+    border-top: 1px solid var(--border);
+    padding: 28px 0 40px;
+    font-size: 13px;
+    color: var(--muted);
+    text-align: center;
+  }
+
+  @media (max-width: 640px) {
+    .hero h1 { font-size: 32px; }
+    .step { padding-left: 58px; }
+  }
+  @media print {
+    nav.toc { display: none; }
+    pre { box-shadow: none; }
+    section { padding: 24px 0 4px; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ═══════════════ Hero ═══════════════ -->
+<header class="hero">
+  <div class="container">
+    <span class="badge">技术架构设计方案 · v1.0</span>
+    <h1>GitTrend <span class="grad">Hub</span></h1>
+    <p class="sub">每天自动追踪 GitHub 热点开源项目，AI 智能归类，以精美卡片流呈现 —— 支持按日期与分类筛选。为独立开发者打造的近零成本、可快速上线的全栈方案。</p>
+    <p class="meta">2026-09-02 · 架构评审稿 · Next.js 15 + Supabase + GitHub Actions</p>
+    <div class="stats">
+      <div class="stat"><div class="v">¥0</div><div class="k">月度起步成本（域名除外）</div></div>
+      <div class="stat"><div class="v">T+1</div><div class="k">每日自动更新时效</div></div>
+      <div class="stat"><div class="v">4 张</div><div class="k">核心数据表</div></div>
+      <div class="stat"><div class="v">5 步</div><div class="k">自动化采集流水线</div></div>
+    </div>
+  </div>
+</header>
+
+<!-- ═══════════════ Nav ═══════════════ -->
+<nav class="toc">
+  <div class="container">
+    <a href="#overview">概述</a>
+    <a href="#architecture">总体架构</a>
+    <a href="#stack">技术栈</a>
+    <a href="#database">数据库设计</a>
+    <a href="#pipeline">自动化流水线</a>
+    <a href="#reliability">可靠性设计</a>
+    <a href="#roadmap">成本与路线图</a>
+  </div>
+</nav>
+
+<!-- ═══════════════ 1. 概述 ═══════════════ -->
+<section id="overview">
+  <div class="container">
+    <h2><span class="num">01</span>项目概述</h2>
+    <p class="lead">GitTrend Hub 解决一个具体问题：GitHub 没有官方 Trending API，开发者想发现「正在升温」的开源项目缺乏可靠、结构化的数据源。本方案每日定时采集候选项目、记录 star 快照并计算真实日增量，经 AI 归类后以卡片流产品化呈现。</p>
+    <div class="grid-3">
+      <div class="feature">
+        <div class="icon">📡</div>
+        <h4>自动采集</h4>
+        <p>GitHub Actions 每日定时运行，Search API 双查询策略兼顾「新秀黑马」与「高星活跃」项目。</p>
+      </div>
+      <div class="feature">
+        <div class="icon">🤖</div>
+        <h4>AI 智能归类</h4>
+        <p>规则预分类 + LLM 批量兜底，自动生成中文一句话简介，成本每天不足一分钱。</p>
+      </div>
+      <div class="feature">
+        <div class="icon">🗂️</div>
+        <h4>热度趋势沉淀</h4>
+        <p>每日 star 快照落库，预计算日增量，时间越久趋势数据越有价值——这是产品的护城河。</p>
+      </div>
+      <div class="feature">
+        <div class="icon">✨</div>
+        <h4>精美卡片流</h4>
+        <p>Next.js RSC + ISR 渲染，支持日期与分类筛选、项目详情与 star 趋势迷你图。</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════ 2. 总体架构 ═══════════════ -->
+<section id="architecture">
+  <div class="container">
+    <h2><span class="num">02</span>总体架构</h2>
+    <p class="lead">三层极简架构：GitHub Actions 负责「产数」，Supabase 负责「存数」，Next.js 负责「显数」。无自建服务器、无自建 API 层。</p>
+
+<pre class="ascii"><code>┌──────────────────────────────────────────────────────────────┐
+│  GitHub Actions（每天 UTC 2:00 定时触发，公共仓库免费）          │
+│                                                              │
+│   ① Fetcher ──→ ② Upsert 项目 ──→ ③ 记录趋势 ──→ ④ AI 归类    │
+│  GitHub Search     写 Supabase      算 star 增量    批量打标签   │
+│       API                                                    │
+└──────────────────────────┬───────────────────────────────────┘
+                           │ service_role key（仅写入）
+                           ▼
+┌──────────────────────────────────────────────────────────────┐
+│  Supabase（PostgreSQL + 自动 REST API + RLS 行级安全）          │
+│   projects / categories / daily_trends / daily_rankings      │
+│   匿名只读（anon key），写入仅 service_role                    │
+└──────────────────────────┬───────────────────────────────────┘
+                           │ anon key（只读，前端直连）
+                           ▼
+┌──────────────────────────────────────────────────────────────┐
+│  Next.js 15（部署在 Vercel）                                   │
+│   App Router + RSC 服务端渲染 + ISR 缓存（1h）                  │
+│   卡片流首页 / 日期筛选 / 分类筛选 / 项目详情(趋势图)             │
+└──────────────────────────────────────────────────────────────┘</code></pre>
+<p class="caption">数据流向：采集脚本单向写入数据库，前端单向只读，二者完全解耦。</p>
+
+    <h3>三个核心架构决策</h3>
+    <div class="grid-3">
+      <div class="card feature decision">
+        <span class="tag">决策一</span>
+        <h4>前端不写 API 路由，RSC 直连 Supabase</h4>
+        <p>全站只有读操作。Supabase 自带 PostgREST + RLS，服务端组件用 anon key 直查，配合 ISR 缓存。省掉一层自建 API，是独立开发者最快的路径。</p>
+      </div>
+      <div class="card feature decision">
+        <span class="tag">决策二</span>
+        <h4>AI 只处理「新项目」，且批量请求</h4>
+        <p>池中 90% 是老项目，分类结果缓存在项目表永不重算。每天新增约 50–100 个项目，合并为 3–5 次批量调用（每次 20 个），AI 成本每天不到 1 分钱。</p>
+      </div>
+      <div class="card feature decision">
+        <span class="tag">决策三</span>
+        <h4>热度 = 每日 star 增量，靠自己积累</h4>
+        <p>GitHub 查不到「今日涨了多少星」。每天把池内项目 star 快照写入 daily_trends，增量 = 今日 − 昨日。数据跑得越久，趋势图越有价值。</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════ 3. 技术栈 ═══════════════ -->
+<section id="stack">
+  <div class="container">
+    <h2><span class="num">03</span>技术栈推荐</h2>
+    <p class="lead">选型原则：托管服务优先、免费额度内运行、单一语言（TypeScript）贯穿全栈、每层都用该领域的「默认答案」。</p>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>层</th><th>选型</th><th>理由</th><th>成本</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>框架</td><td>Next.js 15（App Router + TypeScript）</td><td>RSC / ISR 天然适合「每天更新一次」的内容站，SEO 友好</td><td><span class="pill green">免费</span></td></tr>
+          <tr><td>UI</td><td>Tailwind CSS v4 + shadcn/ui</td><td>卡片流、标签、骨架屏开箱即用，代码归自己所有，不锁依赖</td><td><span class="pill green">免费</span></td></tr>
+          <tr><td>动效</td><td>Framer Motion（按需引入）</td><td>卡片入场 / 悬停微动效，是「精美感」的关键</td><td><span class="pill green">免费</span></td></tr>
+          <tr><td>图表</td><td>纯 SVG sparkline 或 Recharts</td><td>项目详情页 star 趋势迷你图</td><td><span class="pill green">免费</span></td></tr>
+          <tr><td>数据库</td><td>Supabase（PostgreSQL）</td><td>免费层 500MB + 自带 REST / RLS / 管理面板</td><td><span class="pill green">免费</span></td></tr>
+          <tr><td>托管</td><td>Vercel Hobby</td><td>Next.js 亲儿子，全球 CDN，零运维</td><td><span class="pill green">免费</span></td></tr>
+          <tr><td>定时任务</td><td>GitHub Actions cron</td><td>公共仓库免费无时长限制，代码与 CI 同仓库</td><td><span class="pill green">免费</span></td></tr>
+          <tr><td>AI 归类</td><td>GLM-4.5-Flash / DeepSeek / gpt-4o-mini 任一</td><td>分类是小任务，便宜模型足够；接口做成可随时切换</td><td><span class="pill purple">≈¥1/月</span></td></tr>
+          <tr><td>数据源</td><td>GitHub REST API（Search + Repos）</td><td>官方稳定，PAT 限额 5000 req/h</td><td><span class="pill green">免费</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>仓库结构（单仓库，前后端与脚本共享类型）</h3>
+<pre><code class="language-bash">gittrend-hub/
+├── app/                        # Next.js 页面
+│   ├── page.tsx                # 首页卡片流（支持 ?date= 与 ?category=）
+│   ├── project/[owner]/[name]/page.tsx   # 项目详情页
+│   └── api/revalidate/route.ts # ingest 完成后触发缓存刷新
+├── components/                 # ProjectCard / CategoryTabs / DateNav / Sparkline
+├── lib/
+│   ├── supabase.ts             # 服务端客户端（anon key）
+│   └── types.ts                # ★ 数据库类型，前后端与脚本共用
+├── scripts/
+│   └── ingest.ts               # ★ 每日采集流水线入口
+├── supabase/
+│   └── migrations/             # SQL 迁移文件
+├── .github/workflows/ingest.yml
+└── package.json</code></pre>
+  </div>
+</section>
+
+<!-- ═══════════════ 4. 数据库设计 ═══════════════ -->
+<section id="database">
+  <div class="container">
+    <h2><span class="num">04</span>数据库表结构</h2>
+    <p class="lead">四张表各司其职：<code>categories</code> 是维度表，<code>projects</code> 存最新快照，<code>daily_trends</code> 是只追加的时序表，<code>daily_rankings</code> 是预计算的榜单物化结果。</p>
+
+<pre><code class="language-sql">-- ══════════ 1. 分类表 ══════════
+create table categories (
+  id         smallint primary key generated always as identity,
+  slug       text unique not null,          -- 'ai' / 'frontend' / 'backend' / 'devtools'
+  name       text not null,                 -- 'AI / 机器学习'
+  emoji      text,                          -- '🤖'（比 icon 字段简单）
+  color      text,                          -- 主题色 '#8b5cf6'
+  sort_order smallint not null default 100
+);
+
+insert into categories (slug, name, emoji, color, sort_order) values
+  ('ai',        'AI / 机器学习',   '🤖', '#8b5cf6', 1),
+  ('frontend',  '前端',           '🎨', '#3b82f6', 2),
+  ('backend',   '后端 / 基础设施', '⚙️', '#10b981', 3),
+  ('devtools',  '开发工具',       '🛠️', '#f59e0b', 4),
+  ('mobile',    '移动开发',       '📱', '#ec4899', 5),
+  ('database',  '数据库',         '🗄️', '#06b6d4', 6),
+  ('other',     '其他',           '📦', '#6b7280', 99);
+
+-- ══════════ 2. 项目表（核心实体，存"最新"快照） ══════════
+create table projects (
+  id               bigint primary key generated always as identity,
+  github_id        bigint unique not null,      -- GitHub 仓库数字 ID，做幂等键
+  full_name        text not null,               -- 'vercel/next.js'
+  owner            text not null,
+  name             text not null,
+  description      text,                        -- 英文原描述
+  summary          text,                        -- ★ AI 生成的中文一句话简介
+  language         text,
+  topics           text[] not null default '{}',
+  homepage         text,
+  owner_avatar_url text,
+  stars            int not null default 0,      -- 最新 star 数（快照）
+  forks            int not null default 0,
+  open_issues      int,
+  category_id      smallint references categories(id),
+  category_source  text not null default 'ai',  -- 'rule' 规则 | 'ai' | 'manual' 人工纠正
+  first_seen_date  date not null default current_date,
+  updated_at       timestamptz not null default now()
+);
+
+create index idx_projects_category on projects(category_id);
+create index idx_projects_stars on projects(stars desc);
+create index idx_projects_topics on projects using gin(topics);
+
+-- ══════════ 3. 每日热度趋势表（时序数据，只追加不更新） ══════════
+create table daily_trends (
+  id           bigint primary key generated always as identity,
+  project_id   bigint not null references projects(id) on delete cascade,
+  trend_date   date not null,
+  stars        int not null,        -- 当日 star 总数快照
+  stars_gained int not null,        -- ★ 当日新增 = stars - 前一日（预计算，免得查询时自连接）
+  forks        int,
+  unique (project_id, trend_date)   -- 幂等：重跑不会产生重复行
+);
+
+-- 首页核心查询：某天按涨星数排序
+create index idx_trends_date_gained on daily_trends(trend_date, stars_gained desc);
+-- 某项目趋势图
+create index idx_trends_project_date on daily_trends(project_id, trend_date);
+
+-- ══════════ 4. 每日榜单（物化结果，首页直接查，免实时计算） ══════════
+create table daily_rankings (
+  trend_date   date not null,
+  project_id   bigint not null references projects(id) on delete cascade,
+  rank         smallint not null,
+  score        numeric not null,    -- 综合分：stars_gained 加权 + 新秀加成
+  primary key (trend_date, project_id)
+);
+
+-- ══════════ RLS：匿名只读，写入走 service_role 绕过 RLS ══════════
+alter table projects       enable row level security;
+alter table daily_trends   enable row level security;
+alter table daily_rankings enable row level security;
+alter table categories     enable row level security;
+
+create policy "public read" on projects       for select using (true);
+create policy "public read" on daily_trends   for select using (true);
+create policy "public read" on daily_rankings for select using (true);
+create policy "public read" on categories     for select using (true);</code></pre>
+
+    <h3>设计要点</h3>
+    <ul class="points">
+      <li><code>github_id</code> 做唯一键 → upsert 幂等，Actions 重跑不脏库。</li>
+      <li><code>daily_trends</code> 的 <code>(project_id, trend_date)</code> 唯一约束 → 同一天重复执行安全。</li>
+      <li>首页查询只碰 <code>daily_rankings</code>（已算好分数和排名），join <code>projects</code> 取展示字段，单查询出全量卡片数据。</li>
+      <li>时序表只追加、不更新，将来体积大了可按年分表或归档；500MB 免费额度足够跑数年。</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ═══════════════ 5. 自动化流水线 ═══════════════ -->
+<section id="pipeline">
+  <div class="container">
+    <h2><span class="num">05</span>自动化采集脚本（GitHub Actions）</h2>
+    <p class="lead">流水线共五步：<b>候选发现 → 拉取详情 → upsert + 快照 → AI 归类 → 算榜 + 刷缓存</b>。每天 UTC 2:00（北京时间 10:00）自动运行，也支持手动触发调试。</p>
+
+    <h3>5.1 Workflow 定义</h3>
+<pre><code class="language-yaml"># .github/workflows/ingest.yml
+name: Daily Ingest
+on:
+  schedule:
+    - cron: '0 2 * * *'        # UTC 2:00 = 北京 10:00，抓前一天的完整数据
+  workflow_dispatch: {}        # 支持手动触发，调试用
+
+concurrency:
+  group: ingest                # 防止两次运行重叠
+  cancel-in-progress: true
+
+jobs:
+  ingest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - run: npm run ingest
+        env:
+          GITHUB_TOKEN: ${{ secrets.GH_PAT }}          # PAT，比 Actions 内置 token 限额高
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}  # ★ 仅在 Secrets 中
+          AI_API_KEY: ${{ secrets.AI_API_KEY }}
+      - name: Notify on failure
+        if: failure()
+        run: |
+          curl -s -X POST "$SLACK_WEBHOOK" \
+            -d '{"text":"🚨 GitTrend ingest failed"}'
+        env:
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}</code></pre>
+
+    <div class="callout">
+      <b>⚠️ 安全红线：</b><code>service_role</code> key 绕过 RLS，绝不能出现在前端代码或客户端可见的任何位置，只允许存放于 GitHub Actions Secrets 与采集脚本环境变量。前端一律只使用 anon key。
+    </div>
+
+    <h3>5.2 五步流水线（scripts/ingest.ts）</h3>
+    <div class="steps">
+      <div class="step">
+        <h4>候选发现 —— 双查询互补</h4>
+        <p>查询 A 抓近期创建的「新秀」黑马项目，查询 B 压住高星活跃项目保证榜单质量下限，按 <code>github_id</code> 去重合并。</p>
+      </div>
+      <div class="step">
+        <h4>拉取详情 + 幂等入库</h4>
+        <p>对候选集逐个请求仓库详情（约 400 个请求，限额内绰绰有余），p-limit 并发 5 + 429 指数退避，upsert 进 <code>projects</code>。</p>
+      </div>
+      <div class="step">
+        <h4>记录每日趋势快照</h4>
+        <p>写当日 <code>daily_trends</code>，<code>stars_gained</code> = 今日 star − 昨日 star；新项目无昨日数据时按首见日均摊兜底。</p>
+      </div>
+      <div class="step">
+        <h4>AI 归类 —— 规则优先，AI 兜底</h4>
+        <p>规则映射先解决约 60%，剩余新项目按每批 20 个批量调用 LLM，强制 JSON 输出，低置信度归入 <code>other</code> 待人工纠正。</p>
+      </div>
+      <div class="step">
+        <h4>计算每日榜单 + 刷新前端缓存</h4>
+        <p>综合分排序取 TOP 100 写入 <code>daily_rankings</code>，随后调用 revalidate 接口让用户下次访问即见新数据。</p>
+      </div>
+    </div>
+
+    <h3>步骤 ①：候选发现</h3>
+<pre><code class="language-typescript">// 查询 A：近期创建的"新秀"项目（黑马，涨星快）
+// 查询 B：压中高星项目（保证榜单质量下限）
+const queries = [
+  `created:&gt;=${daysAgo(90)} stars:&gt;=50`,        // sort=stars desc → 新秀
+  `stars:&gt;=500 pushed:&gt;=${daysAgo(3)}`,         // sort=stars desc → 活跃高星池
+];
+// Search API 单查询最多返回 1000 条，per_page=100 取前 2~3 页即可
+// 每个 query 结果按 github_id 去重合并 → 候选集（约 300~500 个）</code></pre>
+
+    <h3>步骤 ②③：拉详情 + 幂等入库</h3>
+<pre><code class="language-typescript">// 对候选集逐个 GET /repos/{full_name}（~400 请求，token 限额 5000/h，绰绰有余）
+// 限速：p-limit 并发 5 + 429 退避重试
+
+for (const repo of repos) {
+  // upsert 项目（github_id 冲突则更新 stars / forks / 描述）
+  await supabase.from('projects').upsert(
+    { github_id: repo.id, full_name: repo.full_name, stars: repo.stargazers_count },
+    { onConflict: 'github_id' }
+  );
+
+  // 写今日快照，stars_gained 需要昨天的数：先查，查不到（新项目）按日均摊兜底
+  const { data: yest } = await supabase
+    .from('daily_trends').select('stars')
+    .eq('project_id', projectId).lt('trend_date', today)
+    .order('trend_date', { ascending: false }).limit(1).maybeSingle();
+
+  await supabase.from('daily_trends').upsert({
+    project_id: projectId, trend_date: today,
+    stars: repo.stargazers_count,
+    stars_gained: repo.stargazers_count - (yest?.stars ?? repo.stargazers_count),
+  }, { onConflict: 'project_id,trend_date' });
+}</code></pre>
+
+    <h3>步骤 ④：AI 归类（批量 + 强制 JSON）</h3>
+<pre><code class="language-typescript">// 第一步：规则预分类（零成本，能解决 ~60%）
+// language / topics → category 的静态映射表
+const RULES: Record&lt;string, string&gt; = {
+  TypeScript: 'frontend', Jupyter: 'ai', Python: 'ai',
+  // + topics 映射: 'llm'|'machine-learning' → ai, 'react'|'vue' → frontend ...
+};
+
+// 第二步：仅对规则没把握的新项目，批量调 AI（每批 20 个，一次调用分完）
+const prompt = `你是技术项目分类器。将下列 GitHub 项目分类，并生成中文一句话简介。
+可选分类: ai / frontend / backend / devtools / mobile / database / other
+严格输出 JSON 数组，不要多余文本:
+[{"full_name":"...","category":"...","summary":"中文简介(30字内)","confidence":0.9}]
+项目列表:
+${batch.map(p =&gt; `- ${p.full_name}: ${p.description} [topics: ${p.topics}]`).join('\n')}`;
+
+// 解析后按 confidence 落库：&lt; 0.6 的归入 'other' 并标记，后续人工纠正（category_source='manual'）
+// AI 返回解析失败 → 降级为规则映射 → 再不行归 'other'。绝不让 AI 故障阻断流水线</code></pre>
+
+    <h3>步骤 ⑤：算每日榜单 + 刷缓存</h3>
+<pre><code class="language-typescript">// 综合分：涨星绝对值为主 + 新秀加成（防老牌巨无霸永远霸榜）
+// score = stars_gained * (1 + 2 * exp(-项目年龄天数 / 30))
+// 取 TOP 100 写入 daily_rankings，然后:
+await fetch(`${SITE_URL}/api/revalidate?secret=${REVALIDATE_SECRET}`);
+// → Next.js revalidateTag('daily')，用户下一次访问即见新数据</code></pre>
+  </div>
+</section>
+
+<!-- ═══════════════ 6. 可靠性设计 ═══════════════ -->
+<section id="reliability">
+  <div class="container">
+    <h2><span class="num">06</span>可靠性设计</h2>
+    <p class="lead">无人值守任务的三个敌人：静默失败、数据写脏、外部服务限速。逐项对策如下。</p>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>风险</th><th>对策</th></tr></thead>
+        <tbody>
+          <tr><td>AI 挂了 / 超时</td><td>分类失败不阻断流水线：降级到规则映射 → 再归 <code>other</code>，第二天自动重试</td></tr>
+          <tr><td>GitHub 限速</td><td>请求间隔 + 429 指数退避；Search API 与 REST API 分开计数</td></tr>
+          <tr><td>数据写脏</td><td>所有写入基于唯一键 upsert，<code>workflow_dispatch</code> 手动重跑无害</td></tr>
+          <tr><td>静默失败</td><td>失败发 Slack / 飞书 webhook；每天跑完后校验 <code>daily_rankings</code> 行数 &gt; 0</td></tr>
+          <tr><td>运行重叠</td><td>Workflow 配置 <code>concurrency</code> 组，后触发者取消前一个</td></tr>
+          <tr><td>免费额度</td><td>Actions 公共仓库无限制；每天约 2000 次数据库写入，远低于 Supabase 免费层</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════ 7. 成本与路线图 ═══════════════ -->
+<section id="roadmap">
+  <div class="container">
+    <h2><span class="num">07</span>成本与上线路线</h2>
+    <p class="lead">月成本构成：Vercel / Supabase / GitHub Actions / AI API 全部落在免费额度内，唯一的硬支出是域名（约 ¥60/年）。</p>
+
+    <div class="phase">
+      <h4>🚀 Phase 1 · MVP <span class="when">本周末可上线</span></h4>
+      <ul>
+        <li>Supabase 建表 + SQL 迁移</li>
+        <li>ingest 采集脚本 + Workflow（先手动 workflow_dispatch 触发）</li>
+        <li>首页卡片流 + 分类筛选</li>
+        <li>连续手动跑数几天，积累历史趋势</li>
+      </ul>
+    </div>
+    <div class="phase p2">
+      <h4>📈 Phase 2 · 体验完善 <span class="when">第 2–3 周</span></h4>
+      <ul>
+        <li>日期筛选、每日榜单视图</li>
+        <li>项目详情页 + star 趋势 sparkline</li>
+        <li>切换为每日自动调度 + 失败通知</li>
+      </ul>
+    </div>
+    <div class="phase p3">
+      <h4>🌐 Phase 3 · 增长功能 <span class="when">第 4 周起</span></h4>
+      <ul>
+        <li>用户订阅：每日邮件 / Telegram 推送</li>
+        <li>分类人工纠正后台（category_source = manual）</li>
+        <li>中英双语（i18n）与 SEO 优化</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="container">
+    GitTrend Hub · 技术架构设计方案 v1.0 · 2026-09-02 · Next.js 15 + Supabase + GitHub Actions + LLM
+  </div>
+</footer>
+
+<script>
+  if (window.hljs) { hljs.highlightAll(); }
+</script>
+</body>
+</html>
