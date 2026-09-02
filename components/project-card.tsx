@@ -52,9 +52,11 @@ export function ProjectCard({ row }: { row: RankingRow }) {
               <span>★ {fmtNum(p.stars)}</span>
             </p>
           </div>
-          <span className="ml-auto shrink-0 rounded-full bg-emerald-50 px-2 py-1 text-xs font-semibold tabular-nums text-emerald-600">
-            +{fmtNum(row.stars_gained)}
-          </span>
+          {row.stars_gained > 0 && (
+            <span className="ml-auto shrink-0 rounded-full bg-emerald-50 px-2 py-1 text-xs font-semibold tabular-nums text-emerald-600">
+              +{fmtNum(row.stars_gained)}
+            </span>
+          )}
         </header>
 
         {p.summary && (

@@ -12,7 +12,32 @@
  *
  * 全部写入基于唯一键 upsert / 先删后插，任意时刻手动重跑均安全。
  */
+import { existsSync, readFileSync } from "node:fs";
+import path from "node:path";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+
+/**
+ * 本地加载 .env.local（tsx 不会像 Next.js 那样自动加载 env 文件）。
+ * Actions 上无此文件则跳过；shell / Secrets 中已有的环境变量优先。
+ */
+function loadLocalEnvFile(name = ".env.local"): void {
+  const file = path.join(process.cwd(), name);
+  if (!existsSync(file)) return;
+  for (const line of readFileSync(file, "utf8").split("\n")) {
+    const m = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*?)\s*$/);
+    if (!m) continue;
+    let value = m[2];
+    if (
+      (value.startsWith('"') && value.endsWith('"')) ||
+      (value.startsWith("'") && value.endsWith("'"))
+    ) {
+      value = value.slice(1, -1);
+    }
+    const current = process.env[m[1]];
+    if (current === undefined || current === "") process.env[m[1]] = value;
+  }
+}
+loadLocalEnvFile();
 
 // ────────────────────────── 配置 ──────────────────────────
 
@@ -385,7 +410,7 @@ async function main() {
   const slugToId = new Map((catRows ?? []).map((c) => [c.slug as string, c.id as number]));
   const otherId = slugToId.get("other")!;
 
-  const newGithubIds = [...allRepos.keys()].filter((gid) => !knownIds.has(gid));
+  // 分类对象：所有"还没有分类"的项目（不只新项目）——日后补配 AI key 可自动回填存量
   const toClassify: {
     id: number;
     full_name: string;
@@ -393,17 +418,22 @@ async function main() {
     topics: string[];
     language: string | null;
   }[] = [];
-  for (const part of chunk(newGithubIds, 200)) {
-    if (part.length === 0) continue;
-    const { data, error } = await db
-      .from("projects")
-      .select("id, full_name, description, topics, language, category_id")
-      .in("github_id", part)
-      .is("category_id", null);
-    if (error) throw new Error(`查询待分类项目失败: ${error.message}`);
-    for (const r of (data ?? []) as (typeof toClassify)[number][]) toClassify.push(r);
+  {
+    let from = 0;
+    for (;;) {
+      const { data, error } = await db
+        .from("projects")
+        .select("id, full_name, description, topics, language, category_id")
+        .is("category_id", null)
+        .range(from, from + 999);
+      if (error) throw new Error(`查询待分类项目失败: ${error.message}`);
+      const rows = (data ?? []) as (typeof toClassify)[number][];
+      toClassify.push(...rows);
+      if (rows.length < 1000) break;
+      from += 1000;
+    }
   }
-  console.log(`④ 待分类新项目 ${toClassify.length} 个`);
+  console.log(`④ 待分类项目 ${toClassify.length} 个`);
 
   const updates: ClassifyUpdate[] = [];
   let ruleHits = 0;
@@ -519,10 +549,20 @@ async function main() {
     .sort((a, b) => b.score - a.score)
     .slice(0, RANKING_TOP_N);
 
+  // 首次运行没有昨日基线，全部增量为 0 → 退化为按总星数生成"首日热榜"
+  let ranked = scored;
+  if (ranked.length === 0 && prevStars.size === 0 && gainedRows.length > 0) {
+    ranked = [...allRepos.values()]
+      .sort((a, b) => b.stargazers_count - a.stargazers_count)
+      .slice(0, RANKING_TOP_N)
+      .map((r) => ({ project_id: idMap.get(r.id)!, score: r.stargazers_count, stars_gained: 0 }));
+    console.log(`⑤ 首次运行：无增量基线，改用总星数生成首日热榜`);
+  }
+
   const { error: delErr } = await db.from("daily_rankings").delete().eq("trend_date", dateUTC);
   if (delErr) throw new Error(`清理旧榜单失败: ${delErr.message}`);
-  if (scored.length > 0) {
-    const rows = scored.map((s, i) => ({
+  if (ranked.length > 0) {
+    const rows = ranked.map((s, i) => ({
       trend_date: dateUTC,
       project_id: s.project_id,
       rank: i + 1,
@@ -534,10 +574,10 @@ async function main() {
       if (error) throw new Error(`写入 daily_rankings 失败: ${error.message}`);
     }
   }
-  console.log(`⑤ 榜单生成：TOP ${scored.length}（涨星项目共 ${gainedRows.filter((r) => r.stars_gained > 0).length}）`);
+  console.log(`⑤ 榜单生成：TOP ${ranked.length}（涨星项目共 ${gainedRows.filter((r) => r.stars_gained > 0).length}）`);
 
   // 校验：榜单为空视为异常（GitHub/AI 全挂也该有快照）
-  if (scored.length === 0) throw new Error("今日榜单为空，请检查 Search API 返回是否正常");
+  if (ranked.length === 0) throw new Error("今日榜单为空，请检查 Search API 返回是否正常");
 
   // ── ⑥ 刷新前端缓存 ─────────────────────────────────────
   if (SITE_URL && REVALIDATE_SECRET) {
@@ -552,7 +592,7 @@ async function main() {
   }
 
   console.log(
-    `\n✓ 完成 — 候选 ${candidates.size} · 入库 ${allRepos.size}（新 ${newCount}）· 榜单 TOP ${scored.length}\n`,
+    `\n✓ 完成 — 候选 ${candidates.size} · 入库 ${allRepos.size}（新 ${newCount}）· 榜单 TOP ${ranked.length}\n`,
   );
 }
 

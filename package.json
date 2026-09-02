@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "ingest": "tsx scripts/ingest.ts"
+    "ingest": "NODE_USE_ENV_PROXY=1 tsx scripts/ingest.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.113.0",
