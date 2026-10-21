@@ -56,6 +56,13 @@ const REST_CONCURRENCY = 5; // GitHub REST 请求并发
 const UPSERT_CHUNK = 500;
 const RANKING_TOP_N = 100;
 
+/**
+ * 腾位用的临时名前缀。
+ * 真实 full_name 恒为 "owner/repo"（必含一个 "/"），而这里不含 "/",
+ * 因此永远不会与真实地址冲突，也不会与 GitHub 上的仓库重名。
+ */
+const VACATED_PREFIX = "vacated-";
+
 function requiredEnv(name: string): string {
   const v = process.env[name];
   if (!v) {
@@ -321,9 +328,24 @@ async function main() {
   }
 
   // ── ② 池内刷新：不在今日候选中的存量项目拉最新数据 ──────
-  const { data: poolRows, error: poolErr } = await db.from("projects").select("github_id, full_name");
-  if (poolErr) throw new Error(`查询 projects 失败: ${poolErr.message}（迁移 SQL 是否已执行？）`);
-  const pool = (poolRows ?? []) as { github_id: number; full_name: string }[];
+  // 注意：必须分页拉全量。PostgREST 单次默认最多返回 1000 行，
+  // 池子一旦超过 1000（当前已 1007），后面的存量项目就永远进不了"需刷新"集合。
+  const pool: { github_id: number; full_name: string }[] = [];
+  {
+    let from = 0;
+    for (;;) {
+      const { data, error } = await db
+        .from("projects")
+        .select("github_id, full_name")
+        .order("id")
+        .range(from, from + 999);
+      if (error) throw new Error(`查询 projects 失败: ${error.message}（迁移 SQL 是否已执行？）`);
+      const rows = (data ?? []) as { github_id: number; full_name: string }[];
+      pool.push(...rows);
+      if (rows.length < 1000) break;
+      from += 1000;
+    }
+  }
   const candidateIds = new Set(candidates.keys());
   const stale = pool.filter((p) => !candidateIds.has(p.github_id));
   console.log(`② 池内项目 ${pool.length}，其中 ${stale.length} 个需刷新详情`);
@@ -340,25 +362,119 @@ async function main() {
   });
   const allRepos = new Map<number, GhRepo>();
   for (const r of candidates.values()) allRepos.set(r.id, r);
-  for (const r of refreshed) if (r) allRepos.set(r.id, r);
+  // ②的刷新结果来自对"该地址当前主人"的直接 GET，比①的搜索索引更权威
+  const refreshedIds = new Set<number>();
+  for (const r of refreshed) {
+    if (!r) continue;
+    allRepos.set(r.id, r);
+    refreshedIds.add(r.id);
+  }
   console.log(`② 刷新完成，合计待入库 ${allRepos.size} 个项目${skipped ? `（跳过 ${skipped}）` : ""}`);
 
   // ── ③ 入库 + 当日快照 ──────────────────────────────────
   // 注意：upsert payload 故意不含 first_seen_date —— 老项目冲突更新时不会覆盖首见日期，
   // 新项目插入时由数据库默认值 current_date 填充。
+  //
+  // 【关键】projects 上有两个唯一键：github_id（身份，GitHub 数字 ID 永不复用）
+  // 和 idx_projects_full_name（地址，可变）。ON CONFLICT 只能仲裁一个索引，
+  // 所以 upsert(onConflict: "github_id") 撞上 full_name 唯一索引时整批回滚。
+  //
+  // 冲突来源：GitHub 上仓库被删除后同名重建、或改名后旧地址被别人接管，
+  // 都会让"同一个 full_name"对应两个不同的 github_id。必须先把旧行腾位。
+
+  // ③-1 本轮数据按 full_name 去重：同一地址同一时刻只属于一个活跃仓库。
+  //     两个 id 抢同一地址时，②刷新得到的（直接 GET 该地址的当前主人）比①搜索索引权威；
+  //     两者同源则取 star 更高的（更新更活跃的那个）。
+  //     顺带过滤非法 full_name：真实地址恒为 "owner/repo"（含一个 "/"），
+  //     不合法的记录无法参与地址归属判定，也不该进库。
+  const byFullName = new Map<string, GhRepo>();
+  let invalidName = 0;
+  for (const r of allRepos.values()) {
+    if (!r.full_name || !r.full_name.includes("/")) {
+      invalidName++;
+      continue;
+    }
+    const prev = byFullName.get(r.full_name);
+    if (!prev) {
+      byFullName.set(r.full_name, r);
+      continue;
+    }
+    const preferNew =
+      (refreshedIds.has(r.id) && !refreshedIds.has(prev.id)) ||
+      (refreshedIds.has(r.id) === refreshedIds.has(prev.id) &&
+        r.stargazers_count > prev.stargazers_count);
+    if (preferNew) byFullName.set(r.full_name, r);
+  }
+  const deduped = [...byFullName.values()];
+  if (invalidName > 0) console.log(`③ 跳过 ${invalidName} 个地址格式非法的记录`);
+  const droppedInBatch = allRepos.size - deduped.length;
+  if (droppedInBatch > 0) {
+    console.log(`③ 本轮同名多 id 冲突 ${droppedInBatch} 组，已各保留一个权威项`);
+  }
+
+  // ③-2 腾位：把"本轮要改写、但当前占着旧地址"的行先改成临时名，让出所有目标地址。
+  //     判定条件：该行当前占用的地址，在本轮会被另一个 github_id 接管。
+  //     两种来源：
+  //       a) 旧主人已消失（删除/改名），地址被别人接管 → 幽灵行，需腾位
+  //       b) 两个仓库互换地址（本轮 A 要 B 的地址、B 要 A 的地址）→ 双方都要腾位
+  //     腾位名形如 "vacated-<github_id>"，不含 "/" —— 真实 full_name 恒为 "owner/repo"，
+  //     因此临时名永远不会与真实地址或 GitHub 仓库名冲突。
+  const targetNames = new Set(deduped.map((r) => r.full_name));
+  const batchIds = new Set(deduped.map((r) => r.id));
+  // 本轮每个 github_id 的目标地址
+  const wantedBy = new Map(deduped.map((r) => [r.id, r.full_name]));
+  // 本轮每个地址的主人
+  const ownerOf = new Map(deduped.map((r) => [r.full_name, r.id]));
+  const vacated: { github_id: number; full_name: string }[] = [];
+  for (const p of pool) {
+    if (!targetNames.has(p.full_name)) continue; // 这个地址本轮没人要，不动
+    const owner = ownerOf.get(p.full_name);
+    if (owner === undefined) continue;
+    if (owner === p.github_id) {
+      // 地址的主人没变 → 本轮无需改写这行，不腾位
+      // 但若它本轮要换到别的地址（旧地址被自己腾掉），也要腾位
+      if (wantedBy.get(p.github_id) === p.full_name) continue;
+    }
+    const { error } = await db
+      .from("projects")
+      .update({ full_name: `${VACATED_PREFIX}${p.github_id}` })
+      .eq("github_id", p.github_id);
+    if (error) throw new Error(`腾位失败 ${p.full_name}: ${error.message}`);
+    vacated.push(p);
+  }
+  if (vacated.length > 0) {
+    console.log(`③ 腾位 ${vacated.length} 个被接管/换址的旧地址`);
+  }
+
   const knownIds = new Set(pool.map((p) => p.github_id));
-  const newCount = [...allRepos.values()].filter((r) => !knownIds.has(r.id)).length;
-  for (const part of chunk([...allRepos.values()], UPSERT_CHUNK)) {
+  const newCount = deduped.filter((r) => !knownIds.has(r.id)).length;
+  for (const part of chunk(deduped, UPSERT_CHUNK)) {
     const { error } = await db
       .from("projects")
       .upsert(part.map(toProjectRecord), { onConflict: "github_id" });
     if (error) throw new Error(`upsert projects 失败: ${error.message}`);
   }
-  console.log(`③ projects 入库完成（新项目 ${newCount}，更新 ${allRepos.size - newCount}）`);
+  console.log(`③ projects 入库完成（新项目 ${newCount}，更新 ${deduped.length - newCount}）`);
+
+  // ③-3 清理腾位后仍无主的行：其 github_id 本轮完全没出现 → 仓库已消失。
+  //     daily_trends / daily_rankings 上有 on delete cascade，会一并清理。
+  if (vacated.length > 0) {
+    const gone = vacated.filter((v) => !batchIds.has(v.github_id));
+    for (const part of chunk(gone, 200)) {
+      const { error } = await db
+        .from("projects")
+        .delete()
+        .in("github_id", part.map((g) => g.github_id));
+      if (error) throw new Error(`清理失效项目失败: ${error.message}`);
+    }
+    if (gone.length > 0) {
+      console.log(`③ 清理失效项目 ${gone.length} 个（仓库已删除或改名）`);
+    }
+  }
 
   // github_id → projects.id 映射
   const idMap = new Map<number, number>();
-  for (const part of chunk([...allRepos.keys()], 200)) {
+  for (const part of chunk(deduped.map((r) => r.id), 200)) {
     const { data, error } = await db.from("projects").select("id, github_id").in("github_id", part);
     if (error) throw new Error(`查询 projects.id 失败: ${error.message}`);
     for (const r of (data ?? []) as { id: number; github_id: number }[]) idMap.set(r.github_id, r.id);
@@ -384,7 +500,7 @@ async function main() {
   }
 
   let snapshotCount = 0;
-  for (const part of chunk([...allRepos.values()], UPSERT_CHUNK)) {
+  for (const part of chunk(deduped, UPSERT_CHUNK)) {
     const rows = part.map((r) => {
       const projectId = idMap.get(r.id)!;
       const prev = prevStars.get(projectId);
@@ -552,7 +668,7 @@ async function main() {
   // 首次运行没有昨日基线，全部增量为 0 → 退化为按总星数生成"首日热榜"
   let ranked = scored;
   if (ranked.length === 0 && prevStars.size === 0 && gainedRows.length > 0) {
-    ranked = [...allRepos.values()]
+    ranked = deduped
       .sort((a, b) => b.stargazers_count - a.stargazers_count)
       .slice(0, RANKING_TOP_N)
       .map((r) => ({ project_id: idMap.get(r.id)!, score: r.stargazers_count, stars_gained: 0 }));
@@ -592,7 +708,7 @@ async function main() {
   }
 
   console.log(
-    `\n✓ 完成 — 候选 ${candidates.size} · 入库 ${allRepos.size}（新 ${newCount}）· 榜单 TOP ${ranked.length}\n`,
+    `\n✓ 完成 — 候选 ${candidates.size} · 入库 ${deduped.length}（新 ${newCount}）· 榜单 TOP ${ranked.length}\n`,
   );
 }
 
