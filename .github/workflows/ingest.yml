@@ -11,7 +11,7 @@ concurrency:
 
 jobs:
   ingest:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v5 # v5 起运行于 Node 24（v4 所依赖的 Node 20 已于 2026-09 从 runner 移除）
