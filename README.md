@@ -10,9 +10,9 @@
 
 ### 1. 建数据库
 
-创建 [Supabase](https://supabase.com) 项目，在 **SQL Editor** 中执行
-[`supabase/migrations/0001_init.sql`](supabase/migrations/0001_init.sql)
-（四张表 + 索引 + RLS + 分类种子数据）。
+创建 [Supabase](https://supabase.com) 项目，在 **SQL Editor** 中执行：
+- [`supabase/migrations/0001_init.sql`](supabase/migrations/0001_init.sql)（四张核心表 + 索引 + RLS + 分类种子数据）；
+- [`supabase/migrations/0002_add_period_rankings.sql`](supabase/migrations/0002_add_period_rankings.sql)（周期榜单表：支持周/月/季/年/总榜物化加速；未执行时系统亦会自动启用动态聚合回退，零阻断）。
 
 ### 2. 配置环境变量
 
@@ -73,11 +73,18 @@ supabase/migrations/        SQL 迁移
 docs/architecture.html      完整架构设计文档
 ```
 
-## 数据说明
+## 榜单维度与数据说明
 
-- **热度 = 每日 star 增量**：每天快照全部池内项目的 star 数，`stars_gained = 今日 − 昨日`。
+- **多周期榜单**：
+  - **日榜（Daily）**：按单日 `stars_gained` 及新秀加权分排序，支持任意历史日期回溯。
+  - **周榜（Weekly）**：最近 7 天内累计涨星排行榜。
+  - **月榜（Monthly）**：最近 30 天内累计涨星排行榜。
+  - **季度榜（Quarterly）**：最近 90 天内累计涨星排行榜。
+  - **年度榜（Yearly）**：最近 365 天内累计涨星排行榜。
+  - **总榜（Total）**：项目全量累计 Star 排行榜，汇聚历史最经典殿堂级项目。
+- **热度 = 周期 star 增量**：每天快照全部池内项目的 star 数，`stars_gained = 今日 − 昨日`。
   新项目首日无对比基准，增量记 0（宁可保守，不做虚假涨幅）。
-- **榜单综合分**：`score = stars_gained × (1 + 2·e^(−仓库年龄天数/30))`，
+- **榜单综合分**：`score = stars_gained × (1 + 2·e^(−仓库年龄天数/半衰期))`，
   新秀项目加权，防止老牌巨无霸永远霸榜。
 - **分类来源**：`category_source` 标记 `rule`（规则映射）/ `ai`（LLM 判定）/ `manual`（人工纠正）。
   AI 置信度低于 0.6 归入"其他"。

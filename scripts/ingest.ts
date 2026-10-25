@@ -695,6 +695,9 @@ async function main() {
   // 校验：榜单为空视为异常（GitHub/AI 全挂也该有快照）
   if (ranked.length === 0) throw new Error("今日榜单为空，请检查 Search API 返回是否正常");
 
+  // ⑤-2 周期榜单预计算（周榜、月榜、季度榜、年度榜、总榜）
+  await computeAndSavePeriodRankings(db, dateUTC, metaById, now);
+
   // ── ⑥ 刷新前端缓存 ─────────────────────────────────────
   if (SITE_URL && REVALIDATE_SECRET) {
     try {
@@ -710,6 +713,117 @@ async function main() {
   console.log(
     `\n✓ 完成 — 候选 ${candidates.size} · 入库 ${deduped.length}（新 ${newCount}）· 榜单 TOP ${ranked.length}\n`,
   );
+}
+
+/** 计算并落库周/月/季/年/总榜物化数据 */
+async function computeAndSavePeriodRankings(
+  db: SupabaseClient,
+  dateUTC: string,
+  metaById: Map<number, { github_created_at: string | null; first_seen_date: string }>,
+  now: number,
+): Promise<void> {
+  try {
+    const periods: Array<{ type: "weekly" | "monthly" | "quarterly" | "yearly"; days: number }> = [
+      { type: "weekly", days: 7 },
+      { type: "monthly", days: 30 },
+      { type: "quarterly", days: 90 },
+      { type: "yearly", days: 365 },
+    ];
+
+    const allPeriodRows: Array<{
+      period_type: string;
+      anchor_date: string;
+      project_id: number;
+      rank: number;
+      score: number;
+      stars_gained: number;
+    }> = [];
+
+    // 1. 周/月/季/年榜：从 daily_trends 聚合
+    for (const p of periods) {
+      const d = new Date(dateUTC + "T00:00:00Z");
+      d.setUTCDate(d.getUTCDate() - (p.days - 1));
+      const startDate = d.toISOString().slice(0, 10);
+
+      const { data: trendData, error } = await db
+        .from("daily_trends")
+        .select("project_id, stars_gained")
+        .gte("trend_date", startDate)
+        .lte("trend_date", dateUTC);
+
+      if (error) throw error;
+
+      const gains = new Map<number, number>();
+      for (const t of trendData ?? []) {
+        if (t.stars_gained > 0) {
+          gains.set(t.project_id, (gains.get(t.project_id) ?? 0) + t.stars_gained);
+        }
+      }
+
+      const scored = Array.from(gains.entries())
+        .map(([projectId, gained]) => {
+          const m = metaById.get(projectId);
+          const createdMs = m?.github_created_at
+            ? Date.parse(m.github_created_at)
+            : m?.first_seen_date
+              ? Date.parse(m.first_seen_date + "T00:00:00Z")
+              : now;
+          const ageDays = Math.max(0, (now - createdMs) / 86_400_000);
+          const score = gained * (1 + 2 * Math.exp(-ageDays / Math.max(30, p.days / 2)));
+          return { project_id: projectId, score, stars_gained: gained };
+        })
+        .sort((a, b) => b.score - a.score)
+        .slice(0, RANKING_TOP_N);
+
+      scored.forEach((s, idx) => {
+        allPeriodRows.push({
+          period_type: p.type,
+          anchor_date: dateUTC,
+          project_id: s.project_id,
+          rank: idx + 1,
+          score: Number(s.score.toFixed(2)),
+          stars_gained: s.stars_gained,
+        });
+      });
+    }
+
+    // 2. 总榜：从 projects 按 stars 排序
+    const { data: topProjects, error: topErr } = await db
+      .from("projects")
+      .select("id, stars")
+      .order("stars", { ascending: false })
+      .limit(RANKING_TOP_N);
+
+    if (topErr) throw topErr;
+
+    (topProjects ?? []).forEach((proj, idx) => {
+      allPeriodRows.push({
+        period_type: "total",
+        anchor_date: dateUTC,
+        project_id: proj.id,
+        rank: idx + 1,
+        score: proj.stars,
+        stars_gained: proj.stars,
+      });
+    });
+
+    // 3. 落库到 period_rankings
+    const { error: delErr } = await db.from("period_rankings").delete().eq("anchor_date", dateUTC);
+    if (delErr) throw delErr;
+
+    for (const part of chunk(allPeriodRows, UPSERT_CHUNK)) {
+      const { error: insErr } = await db.from("period_rankings").insert(part);
+      if (insErr) throw insErr;
+    }
+    console.log(`⑤ 周期榜单物化：周/月/季/年/总榜共写入 ${allPeriodRows.length} 条数据`);
+  } catch (err: unknown) {
+    const msg = (err as Error)?.message || String(err);
+    if (msg.includes("relation") && msg.includes("does not exist")) {
+      console.log("  ℹ period_rankings 表尚未建立，可执行 0002_add_period_rankings.sql（前端已启用动态回退，不影响正常使用）");
+    } else {
+      console.warn(`  ⚠ 周期榜单物化跳过: ${msg}`);
+    }
+  }
 }
 
 main().catch((e) => {

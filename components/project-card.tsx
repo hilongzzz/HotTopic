@@ -2,7 +2,7 @@ import Link from "next/link";
 import { cn } from "@/lib/cn";
 import { fmtNum } from "@/lib/format";
 import { languageColor } from "@/lib/language";
-import type { RankingRow } from "@/lib/types";
+import { PERIOD_CONFIGS, type PeriodType, type RankingRow } from "@/lib/types";
 
 const RANK_STYLES: Record<number, string> = {
   1: "bg-gradient-to-br from-amber-400 to-orange-500 text-white",
@@ -10,9 +10,16 @@ const RANK_STYLES: Record<number, string> = {
   3: "bg-gradient-to-br from-amber-600 to-amber-800 text-white",
 };
 
-export function ProjectCard({ row }: { row: RankingRow }) {
+export function ProjectCard({
+  row,
+  period = "daily",
+}: {
+  row: RankingRow;
+  period?: PeriodType;
+}) {
   const p = row.projects;
   const cat = p.categories;
+  const badgeLabel = PERIOD_CONFIGS[period].badgeLabel;
 
   return (
     <Link href={`/project/${p.owner}/${p.name}`} className="group block h-full">
@@ -52,11 +59,15 @@ export function ProjectCard({ row }: { row: RankingRow }) {
               <span>★ {fmtNum(p.stars)}</span>
             </p>
           </div>
-          {row.stars_gained > 0 && (
-            <span className="ml-auto shrink-0 rounded-full bg-emerald-50 px-2 py-1 text-xs font-semibold tabular-nums text-emerald-600">
-              +{fmtNum(row.stars_gained)}
+          {period === "total" ? (
+            <span className="ml-auto shrink-0 rounded-full bg-indigo-50 px-2 py-1 text-xs font-semibold tabular-nums text-accent-strong">
+              ★ {fmtNum(p.stars)}
             </span>
-          )}
+          ) : row.stars_gained > 0 ? (
+            <span className="ml-auto shrink-0 rounded-full bg-emerald-50 px-2 py-1 text-xs font-semibold tabular-nums text-emerald-600">
+              +{fmtNum(row.stars_gained)} {badgeLabel}
+            </span>
+          ) : null}
         </header>
 
         {p.summary && (
